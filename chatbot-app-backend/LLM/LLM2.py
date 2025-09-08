@@ -1,15 +1,66 @@
 from pandas import read_csv
+from .vector_database import FinancialVectorDB
+from typing import Dict, List
 
 
+# Initialize vector database
+vector_db = FinancialVectorDB()
 db = read_csv(r"C:\mydata\MUFG\Hackathon_Dataset.csv")
 conversation_history = []
 
-prompt = f"""
+def get_relevant_context(user_message: str, user_data: Dict) -> str:
+    """
+    Get relevant context using FAISS vector search
+    """
+    try:
+        # Search for relevant funds based on user message
+        message_results = vector_db.search_funds(user_message, k=3, score_threshold=0.3)
+        
+        # Get personalized recommendations based on user profile
+        profile_results = vector_db.get_fund_recommendations(user_data)
+        
+        # Combine results and remove duplicates
+        all_results = message_results + profile_results
+        seen_indices = set()
+        unique_results = []
+        
+        for result in all_results:
+            idx = result['metadata'].get('index', -1)
+            if idx not in seen_indices:
+                seen_indices.add(idx)
+                unique_results.append(result)
+                if len(unique_results) >= 5:  # Limit to top 5
+                    break
+        
+        # Format context
+        context_parts = []
+        context_parts.append("=== RELEVANT FINANCIAL DATA (Vector Search Results) ===")
+        
+        for i, result in enumerate(unique_results, 1):
+            metadata = result['metadata']
+            context_parts.append(f"\n{i}. {result['document']}")
+            context_parts.append(f"   Relevance Score: {result['score']:.3f}")
+        
+        if not unique_results:
+            context_parts.append("No specific fund matches found. Using general dataset knowledge.")
+        
+        context_parts.append("\n=== END VECTOR SEARCH RESULTS ===\n")
+        
+        return "\n".join(context_parts)
+        
+    except Exception as e:
+        print(f"Error in vector search: {e}")
+        return "=== VECTOR SEARCH UNAVAILABLE ===\nUsing complete dataset for analysis.\n"
+
+def create_enhanced_prompt(vector_context: str) -> str:
+    return f"""
     You are a financial assistant specializing in retirement and superannuation planning.
-    Always base your responses on the structured dataset provided below.
+    Always prioritize the RELEVANT FINANCIAL DATA from vector search results below.
     Do NOT use your own system location, and do NOT invent real-time market data or prices.
 
-    Dataset (from CSV):
+    {vector_context}
+
+    Full Dataset (for reference):
     {db}    
 
     ### Your Responsibilities
@@ -66,6 +117,12 @@ def callLLM2(userMessage: str, userData: dict):
         api_key="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",
     )
 
+    # Get relevant context using vector search
+    vector_context = get_relevant_context(userMessage, userData)
+    
+    # Create enhanced prompt with vector context
+    prompt = create_enhanced_prompt(vector_context)
+
     # Format user profile for prompt
     if userData:
         user_profile_str = "\\n".join([f"{k}: {v}" for k, v in userData.items()])
@@ -89,5 +146,5 @@ def callLLM2(userMessage: str, userData: dict):
     assistant_reply = response.choices[0].message.content
     conversation_history.append({"role": "assistant", "content": assistant_reply})
 
-    print("Response generated")
+    print("Response generated with vector context")
     return assistant_reply
