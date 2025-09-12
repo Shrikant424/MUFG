@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  backend:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=development
+      - FLASK_DEBUG=1
+      - DATABASE_URL=sqlite:///superannuation.db
+    volumes:
+      - ./backend:/app
+      - ./backend/data:/app/data
+    networks:
+      - super-ai-network
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:5000
+      - CHOKIDAR_USEPOLLING=true
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+      - /app/node_modules
+    depends_on:
+      - backend
+    networks:
+      - super-ai-network
+    restart: unless-stopped
+
+  # Optional: Add a database service if you want to use PostgreSQL instead of SQLite
+  # postgres:
+  #   image: postgres:14-alpine
+  #   environment:
+  #     - POSTGRES_DB=superannuation
+  #     - POSTGRES_USER=superai
+  #     - POSTGRES_PASSWORD=superai123
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+  #   networks:
+  #     - super-ai-network
+
+networks:
+  super-ai-network:
+    driver: bridge
+
+# volumes:
+#   postgres_data:
