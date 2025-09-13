@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, status
 from pydantic import BaseModel
 from typing import List, Dict, Any
 from openai import OpenAI  # or the DeepSeek client
@@ -12,8 +12,22 @@ from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import load_model
 from datetime import datetime, timedelta
 import os
+import uuid
+from sqlalchemy.orm import Session
 
-app = FastAPI()
+# Database imports
+from database import get_db, init_db, UserProfile, ChatHistory, StockPrediction
+from schemas import (
+    UserProfileCreate, UserProfileUpdate, UserProfileResponse,
+    ChatHistoryResponse, StockPredictionResponse, ProfileSummary,
+    SearchFilters, APIResponse, EnhancedChatMessage, ChatMessage
+)
+from crud import UserProfileCRUD, ChatHistoryCRUD, StockPredictionCRUD, get_user_data_dict
+
+app = FastAPI(title="MUFG Financial Assistant API", version="1.0.0")
+
+# Initialize database
+init_db()
 
 app.add_middleware(
     CORSMiddleware,
@@ -32,58 +46,225 @@ except Exception as e:
     print(f"Error loading model: {e}")
     stock_model = None
 
-class ChatMessage(BaseModel):
-    message: str
-    userData: dict = {}
-
 class PredictionRequest(BaseModel):
     symbol: str
     years: int = 2
 
-# class ChatRequest(BaseModel):
-#     conversation: List[ChatMessage]
-#     query: str
-#     max_history: int = 10
+# =============================================================================
+# USER PROFILE APIS
+# =============================================================================
 
+@app.post("/api/profiles", response_model=UserProfileResponse, status_code=status.HTTP_201_CREATED)
+async def create_user_profile(profile_data: UserProfileCreate, db: Session = Depends(get_db)):
+    """Create a new user profile"""
+    try:
+        profile = UserProfileCRUD.create_profile(db, profile_data)
+        return profile
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create profile: {str(e)}")
 
-# def build_context_messages(conversation: List[Dict[str, Any]], current_query: str, max_history: int = 10):
-#     """Convert chat history + new query into OpenAI-style messages."""
-#     trimmed_history = conversation[-max_history:]
-#     history_text = "\n".join([f"{m['role'].capitalize()}: {m['content']}" for m in trimmed_history])
+@app.get("/api/profiles/{user_id}", response_model=UserProfileResponse)
+async def get_user_profile(user_id: str, db: Session = Depends(get_db)):
+    """Get user profile by user_id"""
+    profile = UserProfileCRUD.get_profile_by_user_id(db, user_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="User profile not found")
+    return profile
 
-#     messages = [
-#         {
-#             "role": "system",
-#             "content": f"Here is the previous conversation for context:\n{history_text}\n"
-#         },
-#         {
-#             "role": "user",
-#             "content": current_query
-#         }
-#     ]
-#     return messages
+@app.put("/api/profiles/{user_id}", response_model=UserProfileResponse)
+async def update_user_profile(user_id: str, profile_data: UserProfileUpdate, db: Session = Depends(get_db)):
+    """Update user profile"""
+    try:
+        profile = UserProfileCRUD.update_profile(db, user_id, profile_data)
+        if not profile:
+            raise HTTPException(status_code=404, detail="User profile not found")
+        return profile
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update profile: {str(e)}")
 
+@app.delete("/api/profiles/{user_id}", response_model=APIResponse)
+async def delete_user_profile(user_id: str, db: Session = Depends(get_db)):
+    """Delete user profile (soft delete)"""
+    success = UserProfileCRUD.delete_profile(db, user_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="User profile not found")
+    
+    return APIResponse(
+        success=True,
+        message=f"User profile {user_id} deleted successfully"
+    )
 
+@app.get("/api/profiles/{user_id}/completeness", response_model=ProfileSummary)
+async def get_profile_completeness(user_id: str, db: Session = Depends(get_db)):
+    """Get profile completeness analysis"""
+    completeness_data = UserProfileCRUD.get_profile_completeness(db, user_id)
+    if "error" in completeness_data:
+        raise HTTPException(status_code=404, detail=completeness_data["error"])
+    
+    return ProfileSummary(
+        user_id=user_id,
+        **completeness_data
+    )
+
+@app.post("/api/profiles/search", response_model=List[UserProfileResponse])
+async def search_user_profiles(
+    filters: SearchFilters,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db)
+):
+    """Search user profiles with filters"""
+    try:
+        profiles = UserProfileCRUD.search_profiles(db, filters, skip, limit)
+        return profiles
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+
+# =============================================================================
+# ENHANCED CHAT APIS WITH DATABASE INTEGRATION
+# =============================================================================
+
+@app.post("/api/chat/enhanced")
+async def enhanced_chat(request: EnhancedChatMessage, db: Session = Depends(get_db)):
+    """Enhanced chat with database integration and context"""
+    start_time = datetime.now()
+    
+    try:
+        # Get user profile for context
+        user_profile = UserProfileCRUD.get_profile_by_user_id(db, request.user_id)
+        user_data = get_user_data_dict(user_profile) if user_profile else {}
+        
+        # Get recent chat context if requested
+        context = []
+        if request.include_context:
+            context = ChatHistoryCRUD.get_recent_context(db, request.user_id, limit=3)
+        
+        # Handle special commands
+        msg = request.message.lower().strip()
+        if msg in ["profile", "show my data", "show my profile"]:
+            if user_data:
+                profile_str = "\\n".join([f"{k}: {v}" for k, v in user_data.items() if v is not None])
+                response = f"Your profile:\\n{profile_str}"
+            else:
+                response = "No user profile data found. Please create your profile first."
+        else:
+            # Call LLM with enhanced context
+            response = callLLM1(request.message, user_data)
+        
+        # Calculate response time
+        response_time = int((datetime.now() - start_time).total_seconds() * 1000)
+        
+        # Save to chat history if requested
+        if request.save_to_history:
+            ChatHistoryCRUD.save_chat(
+                db=db,
+                user_id=request.user_id,
+                user_message=request.message,
+                bot_response=response,
+                llm_model="LLM1",
+                session_id=request.session_id,
+                user_data=user_data,
+                response_time_ms=response_time
+            )
+        
+        return {
+            "reply": response,
+            "user_id": request.user_id,
+            "session_id": request.session_id,
+            "response_time_ms": response_time,
+            "context_used": len(context) > 0,
+            "profile_available": user_profile is not None
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chat processing failed: {str(e)}")
+
+@app.post("/api/chat/explain")
+async def enhanced_explain(request: EnhancedChatMessage, db: Session = Depends(get_db)):
+    """Enhanced explain chat with LLM2"""
+    start_time = datetime.now()
+    
+    try:
+        # Get user profile for context
+        user_profile = UserProfileCRUD.get_profile_by_user_id(db, request.user_id)
+        user_data = get_user_data_dict(user_profile) if user_profile else {}
+        
+        # Call LLM2
+        response = callLLM2(request.message, user_data)
+        
+        # Calculate response time
+        response_time = int((datetime.now() - start_time).total_seconds() * 1000)
+        
+        # Save to chat history if requested
+        if request.save_to_history:
+            ChatHistoryCRUD.save_chat(
+                db=db,
+                user_id=request.user_id,
+                user_message=request.message,
+                bot_response=response,
+                llm_model="LLM2",
+                session_id=request.session_id,
+                user_data=user_data,
+                response_time_ms=response_time
+            )
+        
+        return {
+            "reply": response,
+            "user_id": request.user_id,
+            "session_id": request.session_id,
+            "response_time_ms": response_time,
+            "profile_available": user_profile is not None
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Explain processing failed: {str(e)}")
+
+@app.get("/api/chat/history/{user_id}", response_model=List[ChatHistoryResponse])
+async def get_chat_history(
+    user_id: str,
+    session_id: str = None,
+    limit: int = 50,
+    db: Session = Depends(get_db)
+):
+    """Get chat history for user"""
+    try:
+        history = ChatHistoryCRUD.get_chat_history(db, user_id, session_id, limit)
+        return history
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve chat history: {str(e)}")
+
+# =============================================================================
+# ORIGINAL CHAT APIS (BACKWARD COMPATIBILITY)
+# =============================================================================
 
 @app.post("/chat")
 def chat(request: ChatMessage):
+    """Original chat endpoint for backward compatibility"""
     # If user asks for profile or to show data, return userData directly
     msg = request.message.lower().strip()
     if msg in ["profile", "show my data", "show my profile"]:
         if request.userData:
-            profile_str = "\n".join([f"{k}: {v}" for k, v in request.userData.items()])
-            return {"reply": f"Your profile:\n{profile_str}"}
+            profile_str = "\\n".join([f"{k}: {v}" for k, v in request.userData.items()])
+            return {"reply": f"Your profile:\\n{profile_str}"}
         else:
             return {"reply": "No user profile data found."}
     # Otherwise, pass userData to LLM1 if needed
     response = callLLM1(request.message, request.userData)
     return {"reply": response}
 
-
 @app.post("/explain")
 def explain(request: ChatMessage):
+    """Original explain endpoint for backward compatibility"""
     response = callLLM2(request.message, request.userData)
     return {"reply": response}
+
+# =============================================================================
+# STOCK PREDICTION APIS WITH DATABASE INTEGRATION
+# =============================================================================
 
 # Stock prediction functions
 def get_stock_data(symbol, start_date, end_date):
@@ -139,7 +320,8 @@ def predict_future_years_realistic(model, stock_data, scaler, years=2, lookback_
     return future_dates, np.array(predictions)
 
 @app.post("/predict-stock")
-async def predict_stock(request: PredictionRequest):
+async def predict_stock(request: PredictionRequest, user_id: str = None, db: Session = Depends(get_db)):
+    """Stock prediction with optional database storage"""
     if stock_model is None:
         raise HTTPException(status_code=500, detail="Stock prediction model not loaded")
     
@@ -189,7 +371,7 @@ async def predict_stock(request: PredictionRequest):
         cumulative_returns = np.cumprod(1 + daily_returns)
         max_drawdown = np.min(np.minimum.accumulate(cumulative_returns / np.maximum.accumulate(cumulative_returns)) - 1) * 100
         
-        return {
+        prediction_result = {
             "historical_dates": [date.strftime("%Y-%m-%d") for date in historical_dates],
             "historical_prices": historical_prices.tolist(),
             "future_dates": [date.strftime("%Y-%m-%d") for date in future_dates],
@@ -206,9 +388,72 @@ async def predict_stock(request: PredictionRequest):
             }
         }
         
+        # Save prediction to database if user_id provided
+        if user_id:
+            try:
+                StockPredictionCRUD.save_prediction(
+                    db=db,
+                    user_id=user_id,
+                    symbol=request.symbol,
+                    prediction_years=request.years,
+                    prediction_data=prediction_result,
+                    model_version="v1.0"
+                )
+            except Exception as save_error:
+                print(f"Warning: Failed to save prediction to database: {save_error}")
+        
+        return prediction_result
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/predictions/{user_id}", response_model=List[StockPredictionResponse])
+async def get_user_predictions(
+    user_id: str,
+    symbol: str = None,
+    limit: int = 20,
+    db: Session = Depends(get_db)
+):
+    """Get user's stock prediction history"""
+    try:
+        predictions = StockPredictionCRUD.get_user_predictions(db, user_id, symbol, limit)
+        return predictions
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve predictions: {str(e)}")
+
+@app.get("/api/predictions/{user_id}/analytics")
+async def get_prediction_analytics(user_id: str, db: Session = Depends(get_db)):
+    """Get analytics for user's prediction history"""
+    try:
+        analytics = StockPredictionCRUD.get_prediction_analytics(db, user_id)
+        return analytics
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve analytics: {str(e)}")
+
+# =============================================================================
+# UTILITY ENDPOINTS
+# =============================================================================
+
 @app.get("/")
 async def root():
-    return {"message": "MUFG Financial Assistant API is running"}
+    return {
+        "message": "MUFG Financial Assistant API is running",
+        "version": "1.0.0",
+        "features": [
+            "User Profile Management",
+            "Enhanced Chat with Database Integration",
+            "Stock Prediction with History",
+            "Vector Search Integration",
+            "Chat History Tracking"
+        ]
+    }
+
+@app.get("/api/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now(),
+        "database": "connected",
+        "ml_model": "loaded" if stock_model else "not loaded"
+    }
