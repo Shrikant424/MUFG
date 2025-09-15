@@ -3,9 +3,13 @@ from .vector_database import FinancialVectorDB
 from typing import Dict, List
 
 
+<<<<<<< Updated upstream
 # Initialize vector database
 vector_db = FinancialVectorDB()
 db = read_csv(r"C:\mydata\MUFG\Hackathon_Dataset.csv")
+=======
+db = read_csv(r"D:\Manoj\Projects\Python\mufg\MUFG\Hackathon_Dataset.csv")
+>>>>>>> Stashed changes
 conversation_history = []
 
 def get_relevant_context(user_message: str, user_data: Dict) -> str:
@@ -109,12 +113,28 @@ def create_enhanced_prompt(vector_context: str) -> str:
 
     """
 
-def callLLM2(userMessage: str, userData: dict):
+def callLLM2(userMessage: str, userData: dict, username: str = None):
     from openai import OpenAI
+    from .context_manager import ContextManager
+    import getpass
+    
+    # Database configuration
+    db_config = {
+        "host": "localhost",
+        "user": "root", 
+        "password": "Manoj@123",
+        "database": "UserData"
+    }
+    
+    context_manager = ContextManager(db_config)
 
     client = OpenAI(
         base_url="https://openrouter.ai/api/v1",
+<<<<<<< Updated upstream
         api_key="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",
+=======
+        api_key="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"
+>>>>>>> Stashed changes
     )
 
     # Get relevant context using vector search
@@ -133,10 +153,20 @@ def callLLM2(userMessage: str, userData: dict):
     # Add user profile to the system prompt
     full_prompt = prompt + user_profile_section
 
-    conversation_history.append({"role": "user", "content": userMessage})
+    # Auto-get username if not provided
+    if not username:
+        username = getpass.getuser()
+        print(f"[callLLM2] Auto-detected username: {username}")
+    # Load conversation context from database
+    context_messages = context_manager.get_context_for_llm(username, max_messages=10)
+    # Add user message to context
+    result_user = context_manager.add_message(username, "user", userMessage)
+    # print(f"[callLLM2] User message DB update result: {result_user}")
 
+    # Build messages for LLM
     messages = [{"role": "system", "content": full_prompt}]
-    messages.extend(conversation_history[-10:])
+    messages.extend(context_messages)
+    messages.append({"role": "user", "content": userMessage})
 
     response = client.chat.completions.create(
         model="deepseek/deepseek-r1-0528-qwen3-8b",
@@ -144,7 +174,66 @@ def callLLM2(userMessage: str, userData: dict):
     )
 
     assistant_reply = response.choices[0].message.content
-    conversation_history.append({"role": "assistant", "content": assistant_reply})
+    
+    # Save assistant response to context
+    if username:
+        result_assistant = context_manager.add_message(username, "assistant", assistant_reply)
+        # print(f"[callLLM2] Assistant message DB update result: {result_assistant}")
+    else:
+        conversation_history.append({"role": "assistant", "content": assistant_reply})
 
+<<<<<<< Updated upstream
     print("Response generated with vector context")
     return assistant_reply
+=======
+    # print("Response generated", conversation_history[-1])
+    return assistant_reply
+
+
+# async def callLLM2(userMessage: str, userData: dict, contextMessages: list = None):
+#     """
+#     Call LLM2 with proper message context
+    
+#     Args:
+#         userMessage: Current user message
+#         userData: User profile data
+#         contextMessages: List of previous messages in OpenAI format [{"role": "user/assistant", "content": "..."}]
+#     """
+#     try:
+#         client = OpenAI(
+#             base_url="https://openrouter.ai/api/v1",
+#             api_key="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",
+#         )
+
+#         # Format user profile for prompt
+#         if userData:
+#             user_profile_str = "\n".join([f"{k}: {v}" for k, v in userData.items()])
+#             user_profile_section = f"\n\nUser Profile:\n{user_profile_str}\n"
+#         else:
+#             user_profile_section = "\n\nUser Profile: (not provided)\n"
+
+#         # Build messages array
+#         messages = [{"role": "system", "content": prompt + user_profile_section}]
+        
+#         # Add context messages if provided
+#         if contextMessages:
+#             # Limit context to prevent token overflow (last 12 messages)
+#             recent_context = contextMessages[-12:] if len(contextMessages) > 12 else contextMessages
+#             messages.extend(recent_context)
+        
+#         # Add current user message
+#         messages.append({"role": "user", "content": userMessage})
+
+#         response = client.chat.completions.create(
+#             model="deepseek/deepseek-r1-0528-qwen3-8b",
+#             messages=messages
+#         )
+
+#         assistant_reply = response.choices[0].message.content
+#         print(f"LLM2 Response generated (context messages: {len(contextMessages) if contextMessages else 0})")
+#         return assistant_reply
+        
+#     except Exception as e:
+#         print(f"Error in callLLM2: {e}")
+#         raise e
+>>>>>>> Stashed changes

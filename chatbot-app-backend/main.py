@@ -4,6 +4,7 @@ from typing import List, Dict, Any
 from openai import OpenAI  # or the DeepSeek client
 from LLM.LLM1 import callLLM1
 from LLM.LLM2 import callLLM2
+from LLM.LLM3 import callLLM3
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import numpy as np
@@ -15,6 +16,7 @@ import os
 import uuid
 from sqlalchemy.orm import Session
 
+<<<<<<< Updated upstream
 # Database imports
 from database import get_db, init_db, UserProfile, ChatHistory, StockPrediction
 from schemas import (
@@ -23,6 +25,17 @@ from schemas import (
     SearchFilters, APIResponse, EnhancedChatMessage, ChatMessage
 )
 from crud import UserProfileCRUD, ChatHistoryCRUD, StockPredictionCRUD, get_user_data_dict
+=======
+# --- DB CONNECTION ---
+def get_db():
+    conn = mysql.connector.connect(
+        host="localhost",
+        user="root",
+        password="Manoj@123",
+        database="UserData"
+    )
+    return conn
+>>>>>>> Stashed changes
 
 app = FastAPI(title="MUFG Financial Assistant API", version="1.0.0")
 
@@ -31,7 +44,7 @@ init_db()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],  # React dev server (Vite)
+    allow_origins=["*"],  # Allow all origins for debugging
     allow_credentials=True,
     allow_methods=["*"],   # allow POST, GET, OPTIONS etc.
     allow_headers=["*"],
@@ -46,6 +59,18 @@ except Exception as e:
     print(f"Error loading model: {e}")
     stock_model = None
 
+<<<<<<< Updated upstream
+=======
+class ChatMessage(BaseModel):
+    message: str
+    userData: dict = {}
+    username: str = ""  # Add username for context management
+
+class LLM3Request(BaseModel):
+    message: str
+    userData: dict = {}
+
+>>>>>>> Stashed changes
 class PredictionRequest(BaseModel):
     symbol: str
     years: int = 2
@@ -252,15 +277,65 @@ def chat(request: ChatMessage):
             return {"reply": f"Your profile:\\n{profile_str}"}
         else:
             return {"reply": "No user profile data found."}
-    # Otherwise, pass userData to LLM1 if needed
-    response = callLLM1(request.message, request.userData)
+    # Otherwise, pass userData and username to LLM1
+    response = callLLM1(request.message, request.userData, request.username)
     return {"reply": response}
 
 @app.post("/explain")
 def explain(request: ChatMessage):
+<<<<<<< Updated upstream
     """Original explain endpoint for backward compatibility"""
     response = callLLM2(request.message, request.userData)
     return {"reply": response}
+=======
+    # Get the financial advice from LLM2
+    llm2_response = callLLM2(request.message, request.userData, request.username)
+    
+    # Pass the LLM2 response to LLM3 to extract stock symbols and get predictions
+    llm3_result = callLLM3(
+        userMessage=request.message,
+        llm2_response=llm2_response,
+        userData=request.userData
+    )
+    
+    # Prepare the response
+    response_data = {
+        "reply": llm2_response,
+        "stock_analysis": llm3_result if llm3_result.get("stock_symbol") else None
+    }
+    
+    return response_data
+
+@app.post("/llm3")
+def llm3_endpoint(request: LLM3Request):
+    try:
+        print(f"LLM3 endpoint called with: {request.message}, userData: {request.userData}")
+        
+        # Call LLM3 to extract relevant info
+        response = callLLM3(userMessage=request.message, userData=request.userData)
+        
+        print(f"LLM3 response: {response}")
+
+        # Handle both old string format and new dict format
+        if isinstance(response, dict):
+            # New format - return structured response
+            if not response or not response.get("stock_symbol"):
+                return {"reply": "", "stock_analysis": None}
+            return {"reply": response.get("stock_symbol", ""), "stock_analysis": response}
+        else:
+            # Old format - response is a string (stock symbol or empty)
+            if not response or response.strip() == "" or response.lower() in ["none", "null", "empty"]:
+                return {"reply": "", "stock_analysis": None}
+            return {"reply": response, "stock_analysis": None}
+    
+    except Exception as e:
+        print(f"Error in LLM3 endpoint: {e}")
+        import traceback
+        traceback.print_exc()
+        # Return a fallback response compatible with the old format
+        return {"reply": "", "stock_analysis": None, "error": str(e)}
+
+>>>>>>> Stashed changes
 
 # =============================================================================
 # STOCK PREDICTION APIS WITH DATABASE INTEGRATION
@@ -320,21 +395,64 @@ def predict_future_years_realistic(model, stock_data, scaler, years=2, lookback_
     return future_dates, np.array(predictions)
 
 @app.post("/predict-stock")
+<<<<<<< Updated upstream
 async def predict_stock(request: PredictionRequest, user_id: str = None, db: Session = Depends(get_db)):
     """Stock prediction with optional database storage"""
     if stock_model is None:
         raise HTTPException(status_code=500, detail="Stock prediction model not loaded")
     
+=======
+async def predict_stock(request: PredictionRequest):
+>>>>>>> Stashed changes
     try:
+        # Check if model is loaded
+        if stock_model is None:
+            return {
+                "error": "Stock prediction model not available",
+                "message": f"Cannot predict {request.symbol} - model not loaded",
+                "historical_dates": [],
+                "historical_prices": [],
+                "future_dates": [],
+                "future_predictions": [],
+                "uncertainty_upper": [],
+                "uncertainty_lower": [],
+                "stats": {
+                    "current_price": 0,
+                    "final_price": 0,
+                    "total_return": 0,
+                    "annualized_return": 0,
+                    "volatility": 0,
+                    "max_drawdown": 0
+                }
+            }
+        
         # Fetch historical data
         current_date = datetime.now()
         start_date = (current_date - timedelta(days=3*365 + 120)).strftime("%Y-%m-%d")
         end_date = current_date.strftime("%Y-%m-%d")
         
+        print(f"Fetching stock data for {request.symbol} from {start_date} to {end_date}")
         stock_data = get_stock_data(request.symbol, start_date, end_date)
         
         if stock_data.empty:
-            raise HTTPException(status_code=404, detail="No data found for the given symbol")
+            return {
+                "error": f"No data found for symbol {request.symbol}",
+                "message": f"Stock symbol {request.symbol} not found or delisted",
+                "historical_dates": [],
+                "historical_prices": [],
+                "future_dates": [],
+                "future_predictions": [],
+                "uncertainty_upper": [],
+                "uncertainty_lower": [],
+                "stats": {
+                    "current_price": 0,
+                    "final_price": 0,
+                    "total_return": 0,
+                    "annualized_return": 0,
+                    "volatility": 0,
+                    "max_drawdown": 0
+                }
+            }
         
         # Prepare data
         scaler = prepare_data(stock_data)
@@ -405,7 +523,25 @@ async def predict_stock(request: PredictionRequest, user_id: str = None, db: Ses
         return prediction_result
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error in stock prediction: {e}")
+        return {
+            "error": f"Prediction failed: {str(e)}",
+            "message": f"Unable to predict {request.symbol} due to technical error",
+            "historical_dates": [],
+            "historical_prices": [],
+            "future_dates": [],
+            "future_predictions": [],
+            "uncertainty_upper": [],
+            "uncertainty_lower": [],
+            "stats": {
+                "current_price": 0,
+                "final_price": 0,
+                "total_return": 0,
+                "annualized_return": 0,
+                "volatility": 0,
+                "max_drawdown": 0
+            }
+        }
 
 @app.get("/api/predictions/{user_id}", response_model=List[StockPredictionResponse])
 async def get_user_predictions(
@@ -433,6 +569,63 @@ async def get_prediction_analytics(user_id: str, db: Session = Depends(get_db)):
 # =============================================================================
 # UTILITY ENDPOINTS
 # =============================================================================
+
+@app.delete("/api/chat-history/{username}")
+def clear_chat_history(username: str):
+    """Clear conversation context for a user"""
+    try:
+        from LLM.context_manager import ContextManager
+        
+        db_config = {
+            "host": "localhost",
+            "user": "root",
+            "password": "Manoj@123", 
+            "database": "UserData"
+        }
+        
+        context_manager = ContextManager(db_config)
+        success = context_manager.clear_context(username)
+        
+        if success:
+            return {"status": "success", "message": f"Chat history cleared for {username}"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to clear chat history")
+            
+    except Exception as e:
+        print(e)
+        raise HTTPException(status_code=500, detail="Failed to clear chat history")
+
+@app.get("/api/context-stats/{username}")
+def get_context_stats(username: str):
+    """Get statistics about user's conversation context"""
+    try:
+        from LLM.context_manager import ContextManager
+        
+        db_config = {
+            "host": "localhost",
+            "user": "root",
+            "password": "Manoj@123",
+            "database": "UserData"
+        }
+        
+        context_manager = ContextManager(db_config)
+        context = context_manager.load_context(username)
+        
+        user_messages = len([msg for msg in context if msg.get("role") == "user"])
+        assistant_messages = len([msg for msg in context if msg.get("role") == "assistant"])
+        total_messages = len(context)
+        
+        return {
+            "username": username,
+            "total_messages": total_messages,
+            "user_messages": user_messages,
+            "assistant_messages": assistant_messages,
+            "context_available": total_messages > 0
+        }
+        
+    except Exception as e:
+        print(e)
+        raise HTTPException(status_code=500, detail="Failed to get context statistics")
 
 @app.get("/")
 async def root():

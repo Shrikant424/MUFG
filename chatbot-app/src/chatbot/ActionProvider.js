@@ -1,6 +1,6 @@
 
 import { createChatBotMessage } from "react-chatbot-kit";
-import { callLLM1, callLLM2 } from "./LLMService";
+import { callLLM1, callLLM2,callLLM3 } from "./LLMService";
 
 class ActionProvider {
   constructor(createChatBotMessage, setStateFunc) {
@@ -24,8 +24,18 @@ class ActionProvider {
     }));
   }
 
-  // Extract stock symbols from text
-  extractStockSymbolsFromText(text) {
+
+async extractStockSymbolsFromText(text, userData = {}) {
+  try {
+    // Call LLM3 for dynamic detection with correct parameters
+    const symbol = await callLLM3(text, userData);
+
+    // Check if the response is valid and not an error message
+    if (symbol && symbol !== "NONE" && !symbol.includes("Sorry") && !symbol.includes("⚠️")) {
+      return symbol;
+    }
+
+    // Fallback to static mapping + regex
     const stockMappings = {
       'apple': 'AAPL',
       'google': 'GOOGL',
@@ -39,22 +49,23 @@ class ActionProvider {
       'netflix': 'NFLX'
     };
 
-    // First check for company names
-    for (const [name, symbol] of Object.entries(stockMappings)) {
+    for (const [name, mappedSymbol] of Object.entries(stockMappings)) {
       if (text.toLowerCase().includes(name)) {
-        return symbol;
+        return mappedSymbol;
       }
     }
 
-    // Then check for stock symbol patterns (2-5 uppercase letters)
     const matches = text.match(/\b([A-Z]{2,5})\b/g);
     if (matches) {
-      // Return the first match that looks like a stock symbol
       return matches[0];
     }
 
     return null;
+  } catch (error) {
+    console.error("LLM3 stock extraction failed:", error);
+    return null;
   }
+}
 
   async handleStockPredictionFromAPI(stockSymbol, years = 2) {
     try {
@@ -74,6 +85,13 @@ class ActionProvider {
       }
 
       const predictionData = await response.json();
+      
+      // Check if there's an error in the response
+      if (predictionData.error) {
+        const errorMessage = this.createChatBotMessage(`📊 ${predictionData.message || predictionData.error}`);
+        this.addMessage(errorMessage);
+        return;
+      }
       
       // Add stock chart widget message
       const stockMessage = this.createChatBotMessage(`📈 Stock Analysis for ${stockSymbol}`, {
@@ -128,25 +146,26 @@ class ActionProvider {
       const data = await callLLM1(userMessage, userData);
       
       // Update the loading message with LLM1 response
+      let currentMessages = [];
       this.setState((prev) => {
         const messages = [...prev.messages];
         messages[messages.length - 1] = this.createChatBotMessage("", {
           widget: "markdownMessage",
           payload: { message: data }
         });
+        currentMessages = messages; // Store messages for use outside setState
         return { ...prev, messages };
       });
 
       // Check if LLM1 response contains stock symbols
-      const stockSymbol = this.extractStockSymbolsFromText(data);
+      const stockSymbol = await this.extractStockSymbolsFromText(data, userData);
       if (stockSymbol) {
-        console.log(`Found stock symbol ${stockSymbol} in LLM1 response, generating prediction...`);
-        
-        // Add a brief delay to let the LLM1 response render first
+        console.log(`Found stock symbol ${stockSymbol}, generating prediction...`);
         setTimeout(() => {
           this.handleStockPredictionFromAPI(stockSymbol, 2);
         }, 1000);
       }
+
 
     } catch (error) {
       console.error("Error:", error);
@@ -188,7 +207,7 @@ class ActionProvider {
       });
 
       // Check if LLM2 response contains stock symbols
-      const stockSymbol = this.extractStockSymbolsFromText(data);
+      const stockSymbol = await this.extractStockSymbolsFromText(data, userData);
       if (stockSymbol) {
         console.log(`Found stock symbol ${stockSymbol} in LLM2 response, generating prediction...`);
         
