@@ -235,10 +235,10 @@ The application starts with the Login Page component:
 3. Enters credentials (username/password)
 4. System authenticates via ML server (`/login` or `/signup`)
 5. On success, redirected to dashboard
-
+---
 
 ### Step 2: Profile Setup (First Time Users)
-```bash
+
 New users are redirected to **UserDataForm**:
 
 
@@ -247,7 +247,6 @@ New users are redirected to **UserDataForm**:
 2. Data includes demographics, income, savings, goals
 3. Risk tolerance assessment
 4. Profile saved to ML server (`/profile/{username}`)
-```
 ---
 
 ### Step 3: Dashboard Experience
@@ -261,9 +260,7 @@ The **DashboardPage** is the main hub:
 4. **AI Predictions**: ML-powered retirement projections
 5. **Portfolio Performance**: Risk/return analysis
 6. **Contribution Strategy**: Personalized recommendations
-```
-```
-
+---
 ### Step 4: AI Chat Interface
 Users can access the **ChatPage** for personalized advice:
 
@@ -273,11 +270,7 @@ Users can access the **ChatPage** for personalized advice:
 - Context-aware conversations
 - Profile-based recommendations
 - Chat history persistence
-
-
 ---
-```
-```
 
 ## Component Breakdown
 
@@ -293,9 +286,7 @@ Users can access the **ChatPage** for personalized advice:
 - User authentication state
 - Profile data management
 - Automatic profile fetching
----
-```
-```
+---  
 #### 2. AuthPage Component
 **File Location**: `src/AuthPage.jsx`
 
@@ -305,8 +296,6 @@ Users can access the **ChatPage** for personalized advice:
 - Form validation
 - Error handling and user feedback
 ---
-```
-```
 
 #### 3. UserDataForm Component
 **File Location**: `src/UserDataForm.jsx`
@@ -316,12 +305,7 @@ Users can access the **ChatPage** for personalized advice:
 - Comprehensive financial profile form
 - Multi-step form progression
 - Profile completion tracking
-
-
 ---
-```
-```
-
 #### 4. DashboardPage Component
 **File Location**: `src/Dashboard.js`
 
@@ -332,18 +316,12 @@ Users can access the **ChatPage** for personalized advice:
 - **Portfolio Performance**: Risk/return visualization
 - **Contribution Strategy**: Personalized optimization
 
-
-
-
-
 **UI Components:**
 - Responsive grid layout
 - Interactive progress bars
 - Color-coded risk indicators
 - Currency and percentage formatters
-
-```
-```
+---
 #### 5. ChatPage Component
 **File Location**: `src/chatbot/ChatbotPage.js`
 
@@ -356,9 +334,6 @@ Users can access the **ChatPage** for personalized advice:
 
 
 ---
-```
-```
-
 ## LLM Integration
 ### Implementation Architecture
 The platform integrates Large Language Models for conversational financial advice:
@@ -378,8 +353,6 @@ The LLM maintains context through:
 
 
 ---
-```
-```
 
 ## ML Model Integration
 
@@ -391,21 +364,19 @@ The platform uses custom ML models for:
    - Features: age, income, current savings, risk tolerance
    - Algorithm: Random Forest Regression
    - Output: Projected final balance with confidence intervals
-
+---
 
 2. **Risk Assessment**
    - Portfolio volatility estimation
    - Risk-return optimization
    - Suitability scoring
-
+---
 
 3. **Contribution Optimization**
    - Monthly contribution recommendations
    - Tax efficiency analysis
    - Target income scenarios
 
-```
-```
 ## Security Implementation
 
 
@@ -424,8 +395,6 @@ The platform uses custom ML models for:
 
 
 ---
-```
-```
 ## Contributing
 ### Development Workflow
 1. Fork the repository
@@ -441,8 +410,6 @@ The platform uses custom ML models for:
 - Unit test coverage >80%
 - Documentation for all API endpoints
 
-```
-```
 ```bash
 **Built with React, Python, and AI for smarter retirement planning** 🚀
 ```
